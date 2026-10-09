@@ -1,3 +1,4 @@
+```js
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -9,7 +10,6 @@ const sample = require('../sample');
 
 const router = express.Router();
 const USERNAME = /^[A-Za-z0-9_.-]{3,24}$/;
-// Compared against when a username does not exist, so a miss takes as long as a hit.
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
 
 const limiter = rateLimit({
@@ -21,51 +21,138 @@ const limiter = rateLimit({
 });
 
 const issue = (u) => ({
-  token: jwt.sign({ sub: u.id, username: u.username }, JWT_SECRET, { expiresIn: TOKEN_TTL }),
+  token: jwt.sign(
+    { sub: String(u.id), username: u.username },
+    JWT_SECRET,
+    { expiresIn: TOKEN_TTL }
+  ),
   user: { id: u.id, username: u.username },
 });
 
-router.post('/auth/register', limiter, (req, res) => {
-  const { username, password } = req.body || {};
-  if (typeof username !== 'string' || !USERNAME.test(username.trim()))
-    return res.status(400).json({ error: 'Username needs 3 to 24 letters, numbers, dots, dashes or underscores.' });
-  if (typeof password !== 'string' || password.length < 8 || password.length > 128)
-    return res.status(400).json({ error: 'Use 8 to 128 characters for your password.' });
-  const name = username.trim();
-  if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(name))
-    return res.status(409).json({ error: 'That username is taken. Pick another, or log in.' });
-  const info = db.prepare('INSERT INTO users (username, pass_hash) VALUES (?, ?)').run(name, bcrypt.hashSync(password, 10));
-  res.status(201).json(issue({ id: Number(info.lastInsertRowid), username: name }));
+router.post('/auth/register', limiter, async (req, res, next) => {
+  try {
+    const { username, password } = req.body || {};
+
+    if (typeof username !== 'string' || !USERNAME.test(username.trim())) {
+      return res.status(400).json({
+        error: 'Username needs 3 to 24 letters, numbers, dots, dashes or underscores.',
+      });
+    }
+
+    if (typeof password !== 'string' || password.length < 8 || password.length > 128) {
+      return res.status(400).json({
+        error: 'Use 8 to 128 characters for your password.',
+      });
+    }
+
+    const name = username.trim();
+    const existing = await db.query(
+      'SELECT id FROM users WHERE LOWER(username) = LOWER($1)',
+      [name]
+    );
+
+    if (existing.rowCount) {
+      return res.status(409).json({
+        error: 'That username is taken. Pick another, or log in.',
+      });
+    }
+
+    const passHash = await bcrypt.hash(password, 10);
+    const result = await db.query(
+      'INSERT INTO users (username, pass_hash) VALUES ($1, $2) RETURNING id, username',
+      [name, passHash]
+    );
+
+    res.status(201).json(issue(result.rows[0]));
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({
+        error: 'That username is taken. Pick another, or log in.',
+      });
+    }
+    next(err);
+  }
 });
 
-router.post('/auth/login', limiter, (req, res) => {
-  const { username, password } = req.body || {};
-  const row = typeof username === 'string'
-    ? db.prepare('SELECT id, username, pass_hash FROM users WHERE username = ?').get(username.trim())
-    : null;
-  const ok = bcrypt.compareSync(typeof password === 'string' ? password : '', row ? row.pass_hash : DUMMY_HASH);
-  if (!row || !ok) return res.status(401).json({ error: 'Wrong username or password.' });
-  res.json(issue(row));
+router.post('/auth/login', limiter, async (req, res, next) => {
+  try {
+    const { username, password } = req.body || {};
+
+    const result = typeof username === 'string'
+      ? await db.query(
+          'SELECT id, username, pass_hash FROM users WHERE LOWER(username) = LOWER($1)',
+          [username.trim()]
+        )
+      : { rows: [] };
+
+    const row = result.rows[0];
+    const ok = await bcrypt.compare(
+      typeof password === 'string' ? password : '',
+      row ? row.pass_hash : DUMMY_HASH
+    );
+
+    if (!row || !ok) {
+      return res.status(401).json({ error: 'Wrong username or password.' });
+    }
+
+    res.json(issue(row));
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.get('/me', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT id, username FROM users WHERE id = ?').get(req.user.id);
-  if (!row) return res.status(401).json({ error: 'Account not found. Please log in again.' });
-  res.json({ user: row });
+router.get('/me', requireAuth, async (req, res, next) => {
+  try {
+    const result = await db.query(
+      'SELECT id, username FROM users WHERE id = $1',
+      [req.user.id]
+    );
+
+    if (!result.rowCount) {
+      return res.status(401).json({
+        error: 'Account not found. Please log in again.',
+      });
+    }
+
+    res.json({ user: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.post('/sample', requireAuth, (req, res) => {
-  sample.load(req.user.id);
-  res.status(201).json({ ok: true });
+router.post('/sample', requireAuth, async (req, res, next) => {
+  try {
+    await sample.load(req.user.id);
+    res.status(201).json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.delete('/account', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT pass_hash FROM users WHERE id = ?').get(req.user.id);
-  const pw = req.body && req.body.password;
-  if (!row || typeof pw !== 'string' || !bcrypt.compareSync(pw, row.pass_hash))
-    return res.status(403).json({ error: 'Password is incorrect.' });
-  db.prepare('DELETE FROM users WHERE id = ?').run(req.user.id); // transactions and goals cascade
-  res.json({ ok: true });
+router.delete('/account', requireAuth, async (req, res, next) => {
+  try {
+    const result = await db.query(
+      'SELECT pass_hash FROM users WHERE id = $1',
+      [req.user.id]
+    );
+
+    const row = result.rows[0];
+    const password = req.body && req.body.password;
+
+    if (
+      !row ||
+      typeof password !== 'string' ||
+      !(await bcrypt.compare(password, row.pass_hash))
+    ) {
+      return res.status(403).json({ error: 'Password is incorrect.' });
+    }
+
+    await db.query('DELETE FROM users WHERE id = $1', [req.user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;
+```
