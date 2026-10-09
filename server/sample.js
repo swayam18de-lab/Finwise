@@ -1,11 +1,13 @@
+```js
 const crypto = require('crypto');
 const db = require('./db');
 
-// Dates are placed in the current and previous two months so the charts always look current.
+// Dates are placed in the current and previous two months.
 function monthDate(monthsAgo, day) {
   const d = new Date();
   d.setDate(1);
   d.setMonth(d.getMonth() - monthsAgo);
+
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
@@ -17,27 +19,63 @@ const TX = [
   [0, 1, 'Salary', 'income', 65000], [0, 2, 'Rent', 'needs', 18000], [0, 5, 'Electricity bill', 'needs', 2300],
   [0, 6, 'OTT subscriptions', 'wants', 899], [0, 7, 'Weekend trip', 'wants', 2800], [0, 8, 'Emergency fund top-up', 'savings', 12000],
 ];
+
 const GOALS = [
-  ['Emergency fund', 300000, 120000, 12], ['Goa trip', 60000, 18000, 3], ['New laptop', 90000, 30000, 6],
+  ['Emergency fund', 300000, 120000, 12],
+  ['Goa trip', 60000, 18000, 3],
+  ['New laptop', 90000, 30000, 6],
 ];
 
-function load(userId) {
-  const addTx = db.prepare('INSERT INTO transactions (id, user_id, type, descr, amount, category, date) VALUES (?,?,?,?,?,?,?)');
-  const addGoal = db.prepare('INSERT INTO goals (id, user_id, name, target, saved, deadline) VALUES (?,?,?,?,?,?)');
-  db.exec('BEGIN');
+async function load(userId) {
+  const client = await db.connect();
+
   try {
-    TX.forEach(([m, day, desc, cat, amt]) =>
-      addTx.run(crypto.randomUUID(), userId, cat === 'income' ? 'income' : 'expense', desc, amt, cat, monthDate(m, day)));
-    GOALS.forEach(([name, target, saved, monthsAhead]) => {
+    await client.query('BEGIN');
+
+    for (const [m, day, desc, cat, amt] of TX) {
+      await client.query(
+        `INSERT INTO transactions
+         (id, user_id, type, descr, amount, category, date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          crypto.randomUUID(),
+          userId,
+          cat === 'income' ? 'income' : 'expense',
+          desc,
+          amt,
+          cat,
+          monthDate(m, day),
+        ]
+      );
+    }
+
+    for (const [name, target, saved, monthsAhead] of GOALS) {
       const d = new Date();
       d.setMonth(d.getMonth() + monthsAhead);
-      addGoal.run(crypto.randomUUID(), userId, name, target, saved, d.toISOString().slice(0, 10));
-    });
-    db.exec('COMMIT');
-  } catch (e) {
-    db.exec('ROLLBACK');
-    throw e;
+
+      await client.query(
+        `INSERT INTO goals
+         (id, user_id, name, target, saved, deadline)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          crypto.randomUUID(),
+          userId,
+          name,
+          target,
+          saved,
+          d.toISOString().slice(0, 10),
+        ]
+      );
+    }
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
   }
 }
 
 module.exports = { load };
+```
