@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FinWise</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fraunces:wght@600;700;800&display=swap" rel="stylesheet">
+<script>if(matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.classList.add('dark')</script>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>tailwind.config={darkMode:'class'}</script>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--tt:#fffdf7;--bd:#e7e0cf;--tx:#1c1917;color-scheme:light}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html.dark{--tt:#1c1917;--bd:#44403c;--tx:#f5f5f4;color-scheme:dark}
+body{margin:0;background:#f8f5ee;font-family:'Plus Jakarta Sans',system-ui,-apple-system,'Segoe UI',sans-serif}
+html.dark body{background:#0c0a09}
+h1,h2,h3,.serif{font-family:'Fraunces',Georgia,'Times New Roman',serif}
+.recharts-default-tooltip{background:var(--tt)!important;border:1px solid var(--bd)!important;border-radius:12px;color:var(--tx)}
+.recharts-tooltip-label{color:var(--tx)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-is@18.3.1/umd/react-is.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+<script>
+const {useState,useMemo,useEffect,useRef}=React;
+const {ResponsiveContainer,PieChart,Pie,Cell,Tooltip,Legend,BarChart,Bar,XAxis,YAxis,CartesianGrid,AreaChart,Area}=Recharts;
+const html=htm.bind(React.createElement);
+
+const fmt=n=>'₹'+Math.round(n||0).toLocaleString('en-IN');
+const short=n=>n>=1e7?+(n/1e7).toFixed(1)+'Cr':n>=1e5?+(n/1e5).toFixed(1)+'L':n>=1e3?Math.round(n/1e3)+'K':n;
+const sum=a=>a.reduce((s,t)=>s+t.amount,0);
+const uid=()=>Math.random().toString(36).slice(2,9);
+const today=new Date().toISOString().slice(0,10);
+const mlabel=m=>new Date(m+'-01').toLocaleString('en',{month:'short',year:'2-digit'});
+const fv=(P,r,n)=>{const i=r/1200;return i===0?P*n:P*((Math.pow(1+i,n)-1)/i)*(1+i)};
+const CATS={needs:{label:'Needs',color:'#0d9488'},wants:{label:'Wants',color:'#a8a29e'},savings:{label:'Savings',color:'#d4a437'}};
+const LV=[['Starter',0],['Saver',5],['Builder',10],['Compounder',20],['Wealth architect',30]];
+
+const card='rounded-2xl border border-stone-200 bg-white p-5 shadow-sm dark:border-stone-800 dark:bg-stone-900';
+const hero='rounded-3xl bg-gradient-to-br from-emerald-800 via-emerald-900 to-emerald-950 p-6 text-white shadow-lg';
+const inp='w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 outline-none focus:ring-2 focus:ring-amber-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100';
+const btn='rounded-xl bg-amber-400 px-4 py-2 text-sm font-semibold text-stone-900 hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-40';
+const ghost='rounded-lg px-2 py-1 text-xs font-medium text-stone-500 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800';
+const muted='text-stone-500 dark:text-stone-400';
+const lbl='mb-1 block text-xs font-medium '+muted;
+const head='font-semibold text-stone-900 dark:text-white';
+
+const seed=[
+['Salary','income',62000,'2026-08-01'],['Rent','needs',18000,'2026-08-03'],['Groceries','needs',6500,'2026-08-10'],['Dining out','wants',3200,'2026-08-15'],['Mutual fund SIP','savings',8000,'2026-08-20'],
+['Salary','income',62000,'2026-09-01'],['Freelance project','income',9000,'2026-09-12'],['Rent','needs',18000,'2026-09-03'],['Groceries','needs',7000,'2026-09-09'],['Shopping','wants',5500,'2026-09-18'],['Emergency fund top-up','savings',10000,'2026-09-22'],
+['Salary','income',65000,'2026-10-01'],['Rent','needs',18000,'2026-10-02'],['Electricity bill','needs',2300,'2026-10-05'],['OTT subscriptions','wants',899,'2026-10-06'],['Weekend trip','wants',2800,'2026-10-07'],['Emergency fund top-up','savings',12000,'2026-10-08']
+].map(([desc,c,amount,date])=>({id:uid(),desc,amount,date,type:c==='income'?'income':'expense',category:c}));
+const seedGoals=[
+{id:uid(),name:'Emergency fund',target:300000,saved:120000,deadline:'2027-06-30'},
+{id:uid(),name:'Goa trip',target:60000,saved:18000,deadline:'2026-12-20'},
+{id:uid(),name:'New laptop',target:90000,saved:30000,deadline:'2027-03-31'}];
+
+/* ---------- API client: talks to the Express backend ---------- */
+const API={token:null};
+try{API.token=localStorage.getItem('fw_token')}catch(e){}
+const setToken=t=>{API.token=t;try{t?localStorage.setItem('fw_token',t):localStorage.removeItem('fw_token')}catch(e){}};
+async function call(method,path,body){
+  let r;
+  try{
+    r=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json',...(API.token?{Authorization:'Bearer '+API.token}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+  }catch(e){const x=new Error('Cannot reach the server. Is it running?');x.status=0;throw x}
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){const x=new Error(d.error||'Request failed ('+r.status+')');x.status=r.status;throw x}
+  return d;
+}
+
+function useCount(v){
+  const [x,setX]=useState(0),prev=useRef(0);
+  useEffect(()=>{
+    if(matchMedia('(prefers-reduced-motion: reduce)').matches){setX(v);prev.current=v;return}
+    let raf,from=prev.current,s=performance.now();
+    const step=t=>{const p=Math.min(1,(t-s)/900);setX(from+(v-from)*(1-Math.pow(1-p,3)));if(p<1)raf=requestAnimationFrame(step);else prev.current=v};
+    raf=requestAnimationFrame(step);
+    return()=>cancelAnimationFrame(raf);
+  },[v]);
+  return x;
+}
+
+function Toast({msg}){
+  return msg?html`<div className="pointer-events-none fixed inset-x-0 z-50 flex justify-center px-4" style=${{bottom:'calc(env(safe-area-inset-bottom,0px) + 1rem)'}}>
+    <div role="status" className="rounded-xl bg-emerald-900 px-4 py-3 text-sm font-medium text-amber-200 shadow-lg">${msg}</div></div>`:null;
+}
+
+function Stat({label,value,sub}){
+  return html`<div className=${card}>
+    <p className=${'text-sm '+muted}>${label}</p>
+    <p className="serif mt-1 text-2xl font-bold text-stone-900 dark:text-white">${value}</p>
+    ${sub&&html`<p className=${'mt-1 text-xs '+muted}>${sub}</p>`}
+  </div>`;
+}
+
+function Dashboard({tx,onSeed,name}){
+  const [m,setM]=useState('all');
+  const months=[...new Set(tx.map(t=>t.date.slice(0,7)))].sort();
+  const list=m==='all'?tx:tx.filter(t=>t.date.startsWith(m));
+  const by=(l,c)=>sum(l.filter(t=>t.category===c));
+  const inc=sum(list.filter(t=>t.type==='income'));
+  const needs=by(list,'needs'),wants=by(list,'wants'),sav=by(list,'savings');
+  const kept=inc-needs-wants;
+  const shown=useCount(kept);
+  const rate=inc?sav/inc*100:0;
+  let li=0;LV.forEach((l,i)=>{if(rate>=l[1])li=i});
+  const nx=LV[li+1];
+  const toNext=nx?Math.max(0,nx[1]/100*inc-sav):0;
+  const prog=nx?Math.min(100,(rate-LV[li][1])/(nx[1]-LV[li][1])*100):100;
+  let streak=0;
+  for(let i=months.length-1;i>=0;i--){const l=tx.filter(t=>t.date.startsWith(months[i]));const a=sum(l.filter(t=>t.type==='income'));if(a>0&&by(l,'savings')/a>=0.1)streak++;else break}
+  const pie=[['needs',needs],['wants',wants],['savings',sav]].map(([k,v])=>({key:k,name:CATS[k].label,value:v}));
+  const out=needs+wants+sav;
+  const bars=months.map(mm=>{const l=tx.filter(t=>t.date.startsWith(mm));return{month:mlabel(mm),Income:sum(l.filter(t=>t.type==='income')),Spent:by(l,'needs')+by(l,'wants'),Saved:by(l,'savings')}});
+  const rules=[['needs','Needs',50,0],['wants','Wants',30,0],['savings','Savings',20,1]];
+  const h=new Date().getHours(),greet=h<12?'Good morning':h<17?'Good afternoon':'Good evening';
+  const tick={fill:'currentColor',fontSize:12};
+  return html`<div className="space-y-4">
+    <div className="flex items-center justify-between gap-3">
+      <h2 className="text-lg font-bold text-stone-900 dark:text-white">${greet}${name?', '+name:''}</h2>
+      <select className=${inp+' !w-auto'} value=${m} onChange=${e=>setM(e.target.value)}>
+        <option value="all">All time</option>
+        ${months.map(x=>html`<option key=${x} value=${x}>${mlabel(x)}</option>`)}
+      </select>
+    </div>
+    ${!tx.length&&html`<div className=${card+' flex flex-wrap items-center justify-between gap-3'}>
+      <p className="text-sm text-stone-700 dark:text-stone-200">Your account is empty. Add a transaction, or load sample data to explore.</p>
+      <button className=${btn} onClick=${onSeed}>Load sample data</button></div>`}
+    <div className="grid gap-4 lg:grid-cols-3">
+      <div className=${hero+' lg:col-span-2'}>
+        <p className="text-sm text-emerald-100">You kept</p>
+        <p className="serif text-5xl font-extrabold tracking-tight text-amber-300">${fmt(shown)}</p>
+        <p className="mt-2 text-sm text-emerald-100">${!inc?'Add income to see how much of it you keep.':kept>=0?'That is '+Math.round(kept/inc*100)+'% of the '+fmt(inc)+' you earned, after needs and wants.':'Spending ran ahead of income this period. Trimming wants is the quickest fix.'}</p>
+        <div className="mt-5 grid grid-cols-3 gap-3 border-t border-white/10 pt-4">
+          ${[['Earned',inc],['Spent',needs+wants],['Saved',sav]].map(([l,v])=>html`<div key=${l}><p className="text-xs text-emerald-200">${l}</p><p className="text-base font-semibold sm:text-lg">${fmt(v)}</p></div>`)}
+        </div>
+      </div>
+      <div className=${card}>
+        <p className=${'text-sm '+muted}>Your money level</p>
+        <p className="serif mt-1 text-2xl font-bold text-amber-600 dark:text-amber-300">${LV[li][0]}</p>
+        <div className="mt-3 flex gap-1.5">${LV.map((l,i)=>html`<span key=${l[0]} className=${'h-1.5 flex-1 rounded-full '+(i<=li?'bg-amber-400':'bg-stone-200 dark:bg-stone-700')}></span>`)}</div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-stone-100 dark:bg-stone-800"><div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-amber-400 transition-all" style=${{width:prog+'%'}}></div></div>
+        <p className="mt-2 text-sm text-stone-700 dark:text-stone-200">${nx?'Save '+fmt(toNext)+' more to reach '+nx[0]+'.':'Top level reached. Keep compounding.'}</p>
+        <p className=${'mt-3 text-sm font-medium '+(streak?'text-emerald-600 dark:text-emerald-400':muted)}>${streak?'▲ '+streak+'-month saving streak':'Save 10% of income in a month to start a streak.'}</p>
+        <p className=${'mt-1 text-xs '+muted}>Levels follow the share of income you save: 5%, 10%, 20%, 30%.</p>
+      </div>
+    </div>
+    <div className="grid gap-4 lg:grid-cols-5">
+      <div className=${card+' lg:col-span-3'}>
+        <h3 className=${head}>Income, spending and savings</h3>
+        <div className=${'mt-4 h-64 '+muted}>
+          <${ResponsiveContainer} width="100%" height="100%">
+            <${BarChart} data=${bars} barGap=${4}>
+              <${CartesianGrid} strokeDasharray="3 3" stroke="#a8a29e" strokeOpacity=${0.3} vertical=${false}/>
+              <${XAxis} dataKey="month" tick=${tick} axisLine=${false} tickLine=${false}/>
+              <${YAxis} tickFormatter=${short} tick=${tick} axisLine=${false} tickLine=${false} width=${44}/>
+              <${Tooltip} formatter=${v=>fmt(v)} cursor=${{fill:'rgba(168,162,158,.12)'}}/>
+              <${Legend}/>
+              <${Bar} dataKey="Income" fill="#10b981" radius=${[6,6,0,0]}/>
+              <${Bar} dataKey="Spent" fill="#a8a29e" radius=${[6,6,0,0]}/>
+              <${Bar} dataKey="Saved" fill="#d4a437" radius=${[6,6,0,0]}/>
+            <//>
+          <//>
+        </div>
+      </div>
+      <div className=${card+' lg:col-span-2'}>
+        <h3 className=${head}>Where the money goes</h3>
+        ${out?html`<div className="mt-2 h-44"><${ResponsiveContainer} width="100%" height="100%">
+          <${PieChart}>
+            <${Pie} data=${pie} dataKey="value" nameKey="name" innerRadius=${50} outerRadius=${82} paddingAngle=${3} stroke="none">
+              ${pie.map(d=>html`<${Cell} key=${d.key} fill=${CATS[d.key].color}/>`)}
+            <//>
+            <${Tooltip} formatter=${v=>fmt(v)}/>
+          <//><//></div>`:html`<p className=${'mt-6 text-sm '+muted}>Nothing recorded in this period yet.</p>`}
+        <ul className="mt-2 space-y-2 text-sm">
+          ${pie.map(d=>html`<li key=${d.key} className="flex items-center justify-between">
+            <span className="flex items-center gap-2 text-stone-700 dark:text-stone-200"><span className="h-2.5 w-2.5 rounded-full" style=${{background:CATS[d.key].color}}></span>${d.name}</span>
+            <span className=${muted}>${fmt(d.value)} · ${out?Math.round(d.value/out*100):0}%</span></li>`)}
+        </ul>
+      </div>
+    </div>
+    <div className="grid gap-4 lg:grid-cols-5">
+      <div className=${card+' lg:col-span-3'}>
+        <h3 className=${head}>Your 50/30/20 balance</h3>
+        <p className=${'text-xs '+muted}>A common guide: needs up to 50% of income, wants up to 30%, savings 20% or more.</p>
+        <div className="mt-4 space-y-4">
+          ${rules.map(([k,l,t,min])=>{
+            const a=inc?by(list,k)/inc*100:0,good=min?a>=t:a<=t;
+            return html`<div key=${k}>
+              <div className="flex items-center justify-between text-sm"><span className="text-stone-700 dark:text-stone-200">${l} <span className=${muted}>${Math.round(a)}% of income</span></span>
+                <span className=${'text-xs font-medium '+(good?'text-emerald-600 dark:text-emerald-400':'text-amber-600 dark:text-amber-300')}>${good?'On track':min?'Room to grow':'Room to trim'}</span></div>
+              <div className="relative mt-1.5 h-2 rounded-full bg-stone-100 dark:bg-stone-800">
+                <div className="h-full rounded-full" style=${{width:Math.min(100,a)+'%',background:CATS[k].color}}></div>
+                <span className="absolute -top-1 h-4 w-0.5 bg-stone-400" style=${{left:t+'%'}} title=${'Guide: '+t+'%'}></span>
+              </div></div>`;})}
+        </div>
+      </div>
+      <div className=${card+' flex flex-col justify-center lg:col-span-2'}>
+        <h3 className=${head}>Your future self</h3>
+        <p className="mt-2 text-sm text-stone-700 dark:text-stone-200">${sav>0?html`The ${fmt(sav)} you saved could grow to about <b className="text-emerald-600 dark:text-emerald-400">${fmt(sav*Math.pow(1.12,10))}</b> in 10 years at 12% a year.`:'Save anything this period and see what it could become in 10 years.'}</p>
+        <p className=${'mt-2 text-xs '+muted}>Illustrative only. Real returns vary and are not guaranteed.</p>
+      </div>
+    </div>
+  </div>`;
+}
+
+function Goals({goals,api,notify}){
+  const blank={name:'',target:'',saved:'',deadline:''};
+  const [f,setF]=useState(blank);
+  const [add,setAdd]=useState({});
+  const ok=f.name.trim()&&Number(f.target)>0&&f.deadline;
+  const set=k=>e=>setF({...f,[k]:e.target.value});
+  const create=()=>{if(!ok)return;api.addGoal({id:uid(),name:f.name.trim(),target:Number(f.target),saved:Number(f.saved)||0,deadline:f.deadline});setF(blank);notify('Goal created. Starting is the hardest part.')};
+  const addTo=(id,val)=>{
+    const v=Number(val);if(!(v>0))return;
+    const g=goals.find(x=>x.id===id),a=g.saved/g.target*100,b=(g.saved+v)/g.target*100;
+    api.fundGoal(id,v);setAdd({...add,[id]:''});
+    const hit=[100,75,50,25].find(k=>a<k&&b>=k);
+    notify(hit===100?g.name+' is fully funded. You did it.':hit?'Milestone: '+hit+'% of '+g.name+' reached':'Added '+fmt(v)+' to '+g.name);
+  };
+  const stage=p=>p>=100?'Goal achieved. You made this happen.':p>=75?'Final stretch. The last quarter often feels fastest.':p>=50?'Past halfway. Momentum is on your side.':p>=25?'A quarter done. The hardest part was starting.':'Every rupee here is already working toward it.';
+  const tot=sum(goals.map(g=>({amount:g.saved}))),tt=sum(goals.map(g=>({amount:g.target})));
+  return html`<div className="grid gap-5 lg:grid-cols-3">
+    <div className=${card+' h-fit space-y-3'}>
+      <h3 className=${head}>New savings goal</h3>
+      <div><label className=${lbl}>Goal name</label><input className=${inp} placeholder="e.g. Down payment" value=${f.name} onChange=${set('name')}/></div>
+      <div><label className=${lbl}>Target amount (₹)</label><input type="number" min="0" className=${inp} value=${f.target} onChange=${set('target')}/></div>
+      <div><label className=${lbl}>Already saved (₹)</label><input type="number" min="0" className=${inp} value=${f.saved} onChange=${set('saved')}/>
+        <p className=${'mt-1 text-xs '+muted}>Starting with something already in hand makes a goal easier to finish.</p></div>
+      <div><label className=${lbl}>Deadline</label><input type="date" className=${inp} value=${f.deadline} onChange=${set('deadline')}/></div>
+      <button className=${btn+' w-full'} disabled=${!ok} onClick=${create}>Create goal</button>
+    </div>
+    <div className="space-y-4 lg:col-span-2">
+      ${goals.length>0&&html`<div className=${hero+' !p-5'}>
+        <p className="text-sm text-emerald-100">Already set aside for your goals</p>
+        <p className="serif text-3xl font-extrabold text-amber-300">${fmt(tot)}</p>
+        <p className="mt-1 text-sm text-emerald-100">${Math.round(tot/tt*100)}% of ${fmt(tt)} across ${goals.length} ${goals.length===1?'goal':'goals'}</p></div>`}
+      ${!goals.length&&html`<div className=${card}><p className=${muted}>No goals yet. Name something you want, set a target and a date.</p></div>`}
+      ${goals.map(g=>{
+        const pct=Math.min(100,g.saved/g.target*100);
+        const left=Math.max(0,Math.ceil((new Date(g.deadline)-Date.now())/(30.44*864e5)));
+        const rem=Math.max(0,g.target-g.saved);
+        const status=rem===0?'Fully funded':left===0?'Deadline passed':'Save '+fmt(rem/left)+' a month for '+left+(left===1?' month':' months');
+        return html`<div key=${g.id} className=${card+(rem===0?' !border-amber-400 ring-1 ring-amber-400':'')}>
+          <div className="flex items-start justify-between gap-3">
+            <div><h3 className=${head}>${g.name}</h3>
+              <p className=${'text-xs '+muted}>Due ${new Date(g.deadline).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</p></div>
+            <button className=${ghost} onClick=${()=>api.delGoal(g.id)}>Delete</button>
+          </div>
+          <div className="mt-4 flex items-end justify-between text-sm">
+            <span className="font-semibold text-stone-900 dark:text-white">${fmt(g.saved)} <span className=${'font-normal '+muted}>of ${fmt(g.target)}</span></span>
+            <span className="serif text-lg font-bold text-emerald-600 dark:text-emerald-400">${Math.round(pct)}%</span>
+          </div>
+          <div className="mt-2 h-3 overflow-hidden rounded-full bg-stone-100 dark:bg-stone-800">
+            <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-amber-400 transition-all" style=${{width:pct+'%'}}></div></div>
+          <div className="mt-2 flex gap-1.5">${[25,50,75,100].map(k=>html`<span key=${k} className=${'rounded-full px-2 py-0.5 text-xs font-medium '+(pct>=k?'bg-amber-100 text-amber-800 dark:bg-amber-400/20 dark:text-amber-300':'bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400')}>${pct>=k?'✓ ':''}${k}%</span>`)}</div>
+          <p className="mt-3 text-sm font-medium text-stone-700 dark:text-stone-200">${stage(pct)}</p>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <p className=${'text-sm '+muted}>${status}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              ${[500,1000,5000].map(v=>html`<button key=${v} className=${ghost+' !border !border-stone-200 dark:!border-stone-700'} onClick=${()=>addTo(g.id,v)}>+${fmt(v)}</button>`)}
+              <input type="number" min="0" placeholder="Amount" className=${inp+' !w-24'} value=${add[g.id]||''} onChange=${e=>setAdd({...add,[g.id]:e.target.value})} onKeyDown=${e=>e.key==='Enter'&&addTo(g.id,add[g.id])}/>
+              <button className=${btn} onClick=${()=>addTo(g.id,add[g.id])}>Add funds</button>
+            </div>
+          </div>
+        </div>`;})}
+    </div>
+  </div>`;
+}
+
+function Field({label,value,set,min,max,step,suffix}){
+  return html`<div>
+    <div className="flex items-center justify-between gap-3">
+      <label className="text-sm font-medium text-stone-700 dark:text-stone-200">${label}</label>
+      <div className="flex items-center gap-1.5">
+        <input type="number" className=${inp+' !w-28 text-right'} value=${value} min=${min} step=${step} onChange=${e=>set(Number(e.target.value)||0)}/>
+        <span className=${'w-8 text-sm '+muted}>${suffix}</span>
+      </div>
+    </div>
+    <input type="range" className="mt-3 w-full accent-amber-500" min=${min} max=${max} step=${step} value=${Math.min(value,max)} onChange=${e=>set(Number(e.target.value))}/>
+  </div>`;
+}
+
+function SIP({tx}){
+  const [p,setP]=useState(10000),[r,setR]=useState(12),[y,setY]=useState(10);
+  const yrs=Math.min(Math.max(1,Math.round(y)),50);
+  const data=useMemo(()=>Array.from({length:yrs+1},(_,k)=>({year:k,Invested:p*12*k,Value:Math.round(fv(p,r,12*k))})),[p,r,yrs]);
+  const end=data[yrs],gain=end.Value-end.Invested;
+  const mths=new Set(tx.map(t=>t.date.slice(0,7))).size||1;
+  const spend=sum(tx.filter(t=>t.category==='needs'||t.category==='wants'))/mths;
+  const covers=spend>0?end.Value/spend/12:0;
+  const extra=fv(p+1000,r,12*yrs)-end.Value;
+  const marks=[[1e5,'₹1 lakh'],[1e6,'₹10 lakh'],[1e7,'₹1 crore'],[1e8,'₹10 crore']].map(([v,l])=>({l,k:data.findIndex(d=>d.Value>=v)})).filter(x=>x.k>=1);
+  const tick={fill:'currentColor',fontSize:12};
+  const tile=(a,b)=>html`<div className=${card+' !p-4'}><p className="text-sm text-stone-700 dark:text-stone-200">${a}</p><p className="serif mt-1 text-xl font-bold text-emerald-600 dark:text-emerald-400">${b}</p></div>`;
+  return html`<div className="grid gap-5 lg:grid-cols-5">
+    <div className=${card+' h-fit space-y-6 lg:col-span-2'}>
+      <h3 className=${head}>SIP calculator</h3>
+      <${Field} label="Monthly investment" value=${p} set=${setP} min=${500} max=${200000} step=${500} suffix="₹"/>
+      <${Field} label="Expected annual return" value=${r} set=${setR} min=${1} max=${30} step=${0.5} suffix="%"/>
+      <${Field} label="Duration" value=${y} set=${setY} min=${1} max=${40} step=${1} suffix="yrs"/>
+      <p className=${'text-xs '+muted}>Returns compound monthly, with each instalment invested at the start of the month. Actual market returns vary and are not guaranteed.</p>
+    </div>
+    <div className="space-y-4 lg:col-span-3">
+      <div className=${hero}>
+        <p className="text-sm text-emerald-100">In ${yrs} ${yrs===1?'year':'years'} your future self holds</p>
+        <p className="serif text-5xl font-extrabold tracking-tight text-amber-300">${fmt(end.Value)}</p>
+        <p className="mt-2 text-sm text-emerald-100">Your ${fmt(end.Invested)} grows by ${fmt(gain)}, that is ${(end.Value/end.Invested).toFixed(2)}x.</p>
+        ${marks.length>0&&html`<div className="mt-4 flex flex-wrap gap-2">${marks.map(x=>html`<span key=${x.l} className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-amber-200">${x.l} by year ${x.k}</span>`)}</div>`}
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <${Stat} label="Total invested" value=${fmt(end.Invested)}/>
+        <${Stat} label="Estimated returns" value=${fmt(gain)}/>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        ${tile('Your money earns about',fmt(gain/(yrs*365))+' a day')}
+        ${tile('Adding ₹1,000 a month adds',fmt(extra))}
+        ${covers>0&&tile('Covers your current spending for',covers.toFixed(1)+' years')}
+      </div>
+      <div className=${card}>
+        <h3 className=${head}>Growth over time</h3>
+        <div className=${'mt-4 h-64 '+muted}>
+          <${ResponsiveContainer} width="100%" height="100%">
+            <${AreaChart} data=${data}>
+              <defs>
+                <linearGradient id="gv" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity=${0.45}/><stop offset="100%" stopColor="#10b981" stopOpacity=${0.02}/></linearGradient>
+                <linearGradient id="gi" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#d4a437" stopOpacity=${0.4}/><stop offset="100%" stopColor="#d4a437" stopOpacity=${0.02}/></linearGradient>
+              </defs>
+              <${CartesianGrid} strokeDasharray="3 3" stroke="#a8a29e" strokeOpacity=${0.3} vertical=${false}/>
+              <${XAxis} dataKey="year" tickFormatter=${v=>v+'y'} tick=${tick} axisLine=${false} tickLine=${false}/>
+              <${YAxis} tickFormatter=${short} tick=${tick} axisLine=${false} tickLine=${false} width=${48}/>
+              <${Tooltip} formatter=${v=>fmt(v)} labelFormatter=${v=>'Year '+v}/>
+              <${Legend}/>
+              <${Area} type="monotone" dataKey="Value" name="Maturity value" stroke="#10b981" strokeWidth=${2.5} fill="url(#gv)"/>
+              <${Area} type="monotone" dataKey="Invested" name="Invested" stroke="#d4a437" strokeWidth=${2.5} fill="url(#gi)"/>
+            <//>
+          <//>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function Expenses({tx,api,notify}){
+  const blank={type:'expense',desc:'',amount:'',category:'needs',date:today};
+  const [f,setF]=useState(blank);
+  const [edit,setEdit]=useState(null);
+  const [flt,setFlt]=useState('all');
+  const set=k=>e=>setF({...f,[k]:e.target.value});
+  const ok=f.desc.trim()&&Number(f.amount)>0&&f.date;
+  const save=()=>{
+    if(!ok)return;
+    const amt=Number(f.amount);
+    const rec={type:f.type,desc:f.desc.trim(),amount:amt,date:f.date,category:f.type==='income'?'income':f.category};
+    if(edit)api.updTx({...rec,id:edit});else api.addTx({...rec,id:uid()});
+    notify(edit?'Changes saved':rec.category==='savings'?'Nice. '+fmt(amt)+' more toward your future.':f.type==='income'?'Income added: +'+fmt(amt):'Expense added');
+    setF(blank);setEdit(null);
+  };
+  const quick=(d,c)=>setF({...blank,desc:d,category:c});
+  const startEdit=t=>{setEdit(t.id);setF({type:t.type,desc:t.desc,amount:String(t.amount),category:t.category==='income'?'needs':t.category,date:t.date});window.scrollTo({top:0,behavior:'smooth'})};
+  const list=tx.filter(t=>flt==='all'||t.category===flt).sort((a,b)=>b.date.localeCompare(a.date));
+  const chips=[['all','All'],['needs','Needs'],['wants','Wants'],['savings','Savings'],['income','Income']];
+  const savedMo=sum(tx.filter(t=>t.category==='savings'&&t.date.startsWith(today.slice(0,7))));
+  const enter=e=>e.key==='Enter'&&save();
+  return html`<div className="grid gap-5 lg:grid-cols-3">
+    <div className=${card+' h-fit space-y-3'}>
+      <h3 className=${head}>${edit?'Edit transaction':'Add transaction'}</h3>
+      <div className="grid grid-cols-2 gap-1 rounded-xl bg-stone-100 p-1 dark:bg-stone-800">
+        ${['expense','income'].map(t=>html`<button key=${t} onClick=${()=>setF({...f,type:t})} className=${'rounded-lg py-1.5 text-sm font-medium '+(f.type===t?'bg-white text-emerald-700 shadow-sm dark:bg-stone-900 dark:text-emerald-400':muted)}>${t==='expense'?'Expense':'Income'}</button>`)}
+      </div>
+      ${!edit&&f.type==='expense'&&html`<div className="flex flex-wrap gap-1.5">${[['Rent','needs'],['Groceries','needs'],['Dining out','wants'],['Investment','savings']].map(([d,c])=>html`<button key=${d} onClick=${()=>quick(d,c)} className="rounded-full border border-stone-200 px-2.5 py-1 text-xs text-stone-600 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800">${d}</button>`)}</div>`}
+      <div><label className=${lbl}>Description</label><input className=${inp} placeholder=${f.type==='income'?'e.g. Salary':'e.g. Groceries'} value=${f.desc} onChange=${set('desc')} onKeyDown=${enter}/></div>
+      <div><label className=${lbl}>Amount (₹)</label><input type="number" min="0" className=${inp} value=${f.amount} onChange=${set('amount')} onKeyDown=${enter}/></div>
+      ${f.type==='expense'&&html`<div><label className=${lbl}>Category</label>
+        <select className=${inp} value=${f.category} onChange=${set('category')}>
+          <option value="needs">Needs</option><option value="wants">Wants</option><option value="savings">Savings</option>
+        </select></div>`}
+      <div><label className=${lbl}>Date</label><input type="date" className=${inp} value=${f.date} onChange=${set('date')}/></div>
+      <div className="flex gap-2">
+        <button className=${btn+' flex-1'} disabled=${!ok} onClick=${save}>${edit?'Save changes':'Add transaction'}</button>
+        ${edit&&html`<button className=${ghost+' !px-4 !text-sm'} onClick=${()=>{setEdit(null);setF(blank)}}>Cancel</button>`}
+      </div>
+    </div>
+    <div className=${card+' lg:col-span-2'}>
+      <div className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-200">${savedMo>0?'You have saved '+fmt(savedMo)+' this month. Keep building.':'Nothing saved yet this month. Even ₹500 starts the momentum.'}</div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <h3 className=${head}>Transactions</h3>
+        <div className="flex flex-wrap gap-1.5">
+          ${chips.map(([k,l])=>html`<button key=${k} onClick=${()=>setFlt(k)} className=${'rounded-full px-3 py-1 text-xs font-medium '+(flt===k?'bg-emerald-700 text-white':'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300')}>${l}</button>`)}
+        </div>
+      </div>
+      <ul className="mt-3 divide-y divide-stone-100 dark:divide-stone-800">
+        ${!list.length&&html`<li className=${'py-6 text-sm '+muted}>Nothing here yet. Add a transaction to get started.</li>`}
+        ${list.map(t=>html`<li key=${t.id} className="flex items-center gap-3 py-3">
+          <span className="h-9 w-1.5 shrink-0 rounded-full" style=${{background:t.type==='income'?'#10b981':CATS[t.category].color}}></span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-stone-900 dark:text-white">${t.desc}</p>
+            <p className=${'text-xs '+muted}>${t.type==='income'?'Income':CATS[t.category].label} · ${new Date(t.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</p>
+          </div>
+          <p className=${'text-sm font-semibold '+(t.type==='income'?'text-emerald-600 dark:text-emerald-400':'text-stone-900 dark:text-white')}>${t.type==='income'?'+':'-'}${fmt(t.amount)}</p>
+          <button className=${ghost} onClick=${()=>startEdit(t)}>Edit</button>
+          <button className=${ghost} onClick=${()=>{api.delTx(t.id);if(edit===t.id){setEdit(null);setF(blank)}}}>Delete</button>
+        </li>`)}
+      </ul>
+    </div>
+  </div>`;
+}
+
+function ThemeBtn(){
+  const [d,setD]=useState(document.documentElement.classList.contains('dark'));
+  return html`<button onClick=${()=>{const n=!d;setD(n);document.documentElement.classList.toggle('dark',n)}} aria-label="Toggle dark mode" className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900">${d?'☀ Light':'☾ Dark'}</button>`;
+}
+function Logo(){
+  return html`<div className="flex items-center gap-3">
+    <div className="serif flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-amber-400 text-lg font-extrabold text-white">F</div>
+    <h1 className="text-xl font-extrabold tracking-tight text-stone-900 dark:text-white">FinWise</h1></div>`;
+}
+
+function Auth({onLogin}){
+  const [mode,setMode]=useState('login');
+  const [f,setF]=useState({u:'',p:'',c:''});
+  const [err,setErr]=useState(''),[busy,setBusy]=useState(false);
+  const set=k=>e=>setF({...f,[k]:e.target.value});
+  const go=async()=>{
+    setErr('');const u=f.u.trim();
+    if(!/^[A-Za-z0-9_.-]{3,24}$/.test(u))return setErr('Username needs 3 to 24 letters, numbers, dots, dashes or underscores.');
+    if(!f.p)return setErr('Enter your password.');
+    if(mode==='signup'){
+      if(f.p.length<8)return setErr('Use at least 8 characters for your password.');
+      if(f.p!==f.c)return setErr('The two passwords do not match.');
+    }
+    setBusy(true);
+    try{
+      const d=await call('POST',mode==='signup'?'/auth/register':'/auth/login',{username:u,password:f.p});
+      setToken(d.token);onLogin(d.user);
+    }catch(e){setErr(e.message)}finally{setBusy(false)}
+  };
+  const enter=e=>e.key==='Enter'&&go();
+  return html`<div className="mx-auto flex min-h-[80vh] max-w-md flex-col justify-center px-4 py-6">
+    <div className="mb-6 flex items-center justify-between"><${Logo}/><${ThemeBtn}/></div>
+    <div className=${card+' space-y-4 !p-6'}>
+      <h2 className="text-xl font-bold text-stone-900 dark:text-white">${mode==='login'?'Welcome back':'Create your account'}</h2>
+      <div><label className=${lbl}>Username</label><input className=${inp} autoComplete="username" value=${f.u} onChange=${set('u')} onKeyDown=${enter}/></div>
+      <div><label className=${lbl}>Password</label><input type="password" className=${inp} autoComplete=${mode==='login'?'current-password':'new-password'} value=${f.p} onChange=${set('p')} onKeyDown=${enter}/></div>
+      ${mode==='signup'&&html`<div><label className=${lbl}>Confirm password</label><input type="password" className=${inp} autoComplete="new-password" value=${f.c} onChange=${set('c')} onKeyDown=${enter}/>
+        <p className=${'mt-2 text-xs '+muted}>Your password is hashed on the server (bcrypt) and never stored as plain text.</p></div>`}
+      ${err&&html`<p role="alert" className="text-sm text-amber-700 dark:text-amber-300">${err}</p>`}
+      <button className=${btn+' w-full'} disabled=${busy} onClick=${go}>${busy?'Please wait…':mode==='login'?'Log in':'Create account'}</button>
+      <button className="w-full text-sm font-medium text-emerald-700 dark:text-emerald-400" onClick=${()=>{setMode(mode==='login'?'signup':'login');setErr('')}}>${mode==='login'?'New here? Create an account':'Already have an account? Log in'}</button>
+    </div>
+  </div>`;
+}
+
+function App({user,onLogout}){
+  const [tab,setTab]=useState('dashboard');
+  const [tx,setTx]=useState([]),[goals,setGoals]=useState([]),[ready,setReady]=useState(false);
+  const [toast,setToast]=useState('');
+  const [del,setDel]=useState(false),[pw,setPw]=useState('');
+  const notify=m=>{setToast(m);clearTimeout(window.__t);window.__t=setTimeout(()=>setToast(''),3500)};
+  const fail=e=>{if(e.status===401)onLogout();else notify(e.message)};
+  const reload=()=>Promise.all([call('GET','/transactions'),call('GET','/goals')]).then(([a,b])=>{setTx(a.transactions);setGoals(b.goals);setReady(true)}).catch(fail);
+  useEffect(()=>{reload()},[]);
+  const act=(m,p,b)=>call(m,p,b).then(reload).catch(fail);
+  const api={
+    addTx:r=>act('POST','/transactions',r),
+    updTx:r=>act('PUT','/transactions/'+r.id,r),
+    delTx:id=>act('DELETE','/transactions/'+id),
+    addGoal:g=>act('POST','/goals',g),
+    fundGoal:(id,v)=>act('POST','/goals/'+id+'/fund',{amount:v}),
+    delGoal:id=>act('DELETE','/goals/'+id),
+    seed:()=>call('POST','/sample').then(()=>{notify('Sample data loaded');return reload()}).catch(fail)
+  };
+  const removeAccount=async()=>{
+    if(!del){setDel(true);return}
+    try{await call('DELETE','/account',{password:pw});onLogout()}catch(e){notify(e.message)}
+  };
+  const tabs=[['dashboard','Dashboard'],['goals','Goals'],['sip','SIP calculator'],['expenses','Expenses']];
+  return html`<div className="mx-auto max-w-6xl px-4 py-6 text-stone-800 dark:text-stone-200">
+    <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+      <${Logo}/>
+      <div className="flex items-center gap-3">
+        <nav className="max-w-full overflow-x-auto rounded-xl bg-stone-200/70 p-1 dark:bg-stone-800">
+          <div className="flex gap-1">
+            ${tabs.map(([k,l])=>html`<button key=${k} onClick=${()=>setTab(k)} className=${'whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium '+(tab===k?'bg-white text-emerald-700 shadow-sm dark:bg-stone-950 dark:text-emerald-400':muted)}>${l}</button>`)}
+          </div>
+        </nav>
+        <${ThemeBtn}/>
+      </div>
+    </header>
+    <main>
+      ${!ready&&html`<p className=${'py-16 text-center text-sm '+muted}>Loading your data…</p>`}
+      ${ready&&tab==='dashboard'&&html`<${Dashboard} tx=${tx} name=${user.username} onSeed=${api.seed}/>`}
+      ${ready&&tab==='goals'&&html`<${Goals} goals=${goals} api=${api} notify=${notify}/>`}
+      ${ready&&tab==='sip'&&html`<${SIP} tx=${tx}/>`}
+      ${ready&&tab==='expenses'&&html`<${Expenses} tx=${tx} api=${api} notify=${notify}/>`}
+    </main>
+    <footer className=${'mt-8 space-y-2 text-center text-xs '+muted}>
+      <p>Your data is stored in the SQLite database on the server.</p>
+      <p>Signed in as <b>${user.username}</b> · <button className="font-medium underline" onClick=${onLogout}>Log out</button> · <button className=${'font-medium underline '+(del?'text-amber-700 dark:text-amber-300':'')} onClick=${removeAccount}>${del?'Confirm delete account and data':'Delete account'}</button></p>
+      ${del&&html`<div className="mx-auto flex max-w-xs items-center gap-2"><input type="password" placeholder="Enter your password to confirm" className=${inp} value=${pw} onChange=${e=>setPw(e.target.value)} onKeyDown=${e=>e.key==='Enter'&&removeAccount()}/><button className=${ghost+' !text-sm'} onClick=${()=>{setDel(false);setPw('')}}>Cancel</button></div>`}
+    </footer>
+    <${Toast} msg=${toast}/>
+  </div>`;
+}
+
+function Root(){
+  const [user,setUser]=useState(null),[ready,setReady]=useState(!API.token);
+  useEffect(()=>{if(!API.token)return;call('GET','/me').then(d=>setUser(d.user)).catch(e=>{if(e.status===401)setToken(null)}).finally(()=>setReady(true))},[]);
+  const out=()=>{setToken(null);setUser(null)};
+  if(!ready)return html`<div className="flex min-h-[80vh] items-center justify-center text-sm text-stone-500 dark:text-stone-400">Loading…</div>`;
+  return user?html`<${App} key=${user.id} user=${user} onLogout=${out}/>`:html`<${Auth} onLogin=${setUser}/>`;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${Root}/>`);
+</script>
+</body>
+</html>
